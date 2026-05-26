@@ -43,8 +43,15 @@ them instead of pasting the prompts:
   git-sync cron via flock, handles new branches and a moved remote, and proves the
   push landed). Captures cost telemetry (tool/service/API usage, time-in-function).
 
+The cost telemetry is fed by `skills/session-close/scripts/telemetry-hook.sh`, a Claude
+Code hook wired into `~/.claude/settings.json` (PostToolUse, SessionStart, UserPromptSubmit,
+Stop, SessionEnd). It appends one JSONL line per tool call and per session boundary to
+`/root/.claude/telemetry/` (tool name and prompt length only, never tool input or prompt
+text). The install block is documented at the bottom of that script. Until the hook is
+wired on a box, the close-out reports tool/time telemetry as "not captured".
+
 Install by copying a skill folder into `.claude/skills/` (or `/root/.claude/skills/`
-on the servers).
+on the servers), then add the hook block from `telemetry-hook.sh` to `~/.claude/settings.json`.
 
 ---
 

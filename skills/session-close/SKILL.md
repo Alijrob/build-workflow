@@ -84,7 +84,20 @@ that does not exist or yields nothing, report it as "not captured (no source)". 
 estimate numbers you cannot read. Return a compact block, nothing verbose.
 
 Sources to check:
-- /root/opims/logs/activity.jsonl and /root/opims/logs/tool-usage.jsonl  (hook telemetry)
+- /root/.claude/telemetry/activity.jsonl and /root/.claude/telemetry/tool-usage.jsonl
+  (Claude Code hook telemetry, written by telemetry-hook.sh - one JSONL line per tool
+  call and per session-boundary event). Read them like this:
+    1. Active session_id = the session_id on the LAST line of tool-usage.jsonl (fall
+       back to the last SessionStart in activity.jsonl). This is the session being
+       closed. Caveat: if two Claude sessions ran on this box at once, pick the most
+       recent session_id and say so.
+    2. Tool counts = count tool-usage.jsonl lines for that session_id, grouped by the
+       "tool" field (e.g. Bash: 12, Edit: 4, Read: 9).
+    3. Session wall-clock = (latest event ts for that session_id) minus its SessionStart
+       ts in activity.jsonl, if a SessionStart line exists.
+    4. Prompt count = UserPromptSubmit lines for that session_id in activity.jsonl.
+  If a file is missing or empty, report that source as "not captured (no hook data yet)";
+  do not guess. jq one-liners are fine.
 - pm2 jlist  (process uptime / restarts, for automation runtime)
 - n8n execution logs or API if reachable  (workflow executions this window)
 - tailscale status  (which tailnet peers were used)
@@ -92,8 +105,11 @@ Sources to check:
 
 Return exactly:
 ## Telemetry
+- Claude tool counts: [tool: N per tool from hook telemetry, or "not captured (no hook data)"]
+- Session wall-clock: [HH:MM from SessionStart to last event, or "not captured"]
+- Prompts this session: [N UserPromptSubmit lines, or "not captured"]
 - External services used: [n8n: N execs | tailscale: peers | SSH targets | "none found"]
-- API usage: [provider: N calls ~$X each line, or "not captured"]
+- API usage: [provider: N calls ~$X each line, or "not captured (hooks do not expose model cost)"]
 - Time in function: [automation runtime from pm2/pipeline logs, or "not captured"]
 - Source per line: [where each number came from, or "unverified"]
 ```
@@ -109,8 +125,9 @@ Write `docs/session-logs/YYYY-MM-DD-session-summary.md` (use that path if `docs/
 ```
 ## Telemetry
 - Model: main close-out on [Opus model]; session ran on [SESSION_MODEL]; subagents on Haiku
-- Claude tools invoked this session: [Bash, Edit, Write, Read, Agent, ... with rough counts]
-[then the External services / API usage / Time in function lines from the subagent]
+[then the Claude tool counts / Session wall-clock / Prompts / External services / API usage /
+ Time in function / Source lines returned by the subagent. Prefer the subagent's hook-derived
+ tool counts over your own recollection; fall back to recollection only if the hook data is missing.]
 ```
 
 Leave the `Commit SHA` placeholder; the git executor fills it. Add the log path to `FILES_THIS_SESSION`.
