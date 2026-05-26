@@ -46,9 +46,24 @@ them instead of pasting the prompts:
 The cost telemetry is fed by `skills/session-close/scripts/telemetry-hook.sh`, a Claude
 Code hook wired into `~/.claude/settings.json` (PostToolUse, SessionStart, UserPromptSubmit,
 Stop, SessionEnd). It appends one JSONL line per tool call and per session boundary to
-`/root/.claude/telemetry/` (tool name and prompt length only, never tool input or prompt
-text). The install block is documented at the bottom of that script. Until the hook is
-wired on a box, the close-out reports tool/time telemetry as "not captured".
+`/root/.claude/telemetry/` (tool name, skill slug, and prompt length only, never tool
+input, skill args, or prompt text). The install block is documented at the bottom of that
+script. Until the hook is wired on a box, the close-out reports tool/time telemetry as
+"not captured".
+
+For cross-session cost analysis, `telemetry-ingest.py` loads the JSONL into a SQLite db
+(`telemetry-schema.sql`, stored at `/root/.claude/telemetry/telemetry.db`). It is idempotent
+via a per-file line watermark, so re-running only loads new lines. The schema gives a raw
+`skill_events` table plus two views: `skill_runs` (per-session rollup: duration, tool calls,
+prompts, skill invocations) and `skill_usage` (per-skill invocation counts, the "which skills
+cost what" view). Run it on demand:
+
+```
+python3 skills/session-close/scripts/telemetry-ingest.py --report
+```
+
+A cron could keep the db current, but that is left to the operator to install (it touches
+no shared infra; SQLite is a single local file, no service or port).
 
 Install by copying a skill folder into `.claude/skills/` (or `/root/.claude/skills/`
 on the servers), then add the hook block from `telemetry-hook.sh` to `~/.claude/settings.json`.

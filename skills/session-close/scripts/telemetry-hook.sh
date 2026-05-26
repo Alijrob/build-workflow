@@ -10,9 +10,10 @@
 # It fires on EVERY tool call, globally, so it is built to be harmless:
 #   - Fast: a single jq pass, then an append.
 #   - Never blocks or fails a tool: it always exits 0, even on bad input.
-#   - Privacy: it records the tool NAME and the prompt LENGTH only. It never
-#     stores tool_input, file contents, command text, or prompt text, so a
-#     sensitive value passed to Bash/Write never lands in the telemetry file.
+#   - Privacy: it records the tool NAME and the prompt LENGTH only, plus the skill
+#     slug (not its args) when the tool is "Skill". It never stores tool_input,
+#     file contents, command text, or prompt text, so a sensitive value passed to
+#     Bash/Write never lands in the telemetry file.
 #   - PostToolUse lines go to tool-usage.jsonl; all other events to activity.jsonl.
 #
 # Output dir: $CLAUDE_TELEMETRY_DIR (default /root/.claude/telemetry).
@@ -38,6 +39,7 @@ out="$(printf '%s' "$payload" | jq -rc --arg ts "$ts" '
       session_id: .session_id,
       cwd: .cwd,
       tool: .tool_name,
+      skill: (if .tool_name == "Skill" then .tool_input.skill else null end),
       source: .source,
       model: .model,
       prompt_len: (if .prompt == null then null else (.prompt | length) end)
