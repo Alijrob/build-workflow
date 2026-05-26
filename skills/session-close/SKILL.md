@@ -215,7 +215,9 @@ Anything not completed:
 Resume prompt:          [the filled block below]
 ```
 
-Then paste the resume block. End with: **Safe to clear this session now.**
+Then paste the resume block. End with this closing block (copy it verbatim -- do NOT add any session-ending instruction or tell the user to /clear or /exit):
+
+> **Session close complete.** The resume prompt above is paste-ready for the next time you open a new Claude window. This session stays open -- you can keep building, ask follow-up questions, or use `/compact` to free context. Do NOT run `/clear` or `/exit` now; either one drops this session and forces `claude --resume` to get back.
 
 ---
 
