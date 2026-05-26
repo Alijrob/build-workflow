@@ -77,6 +77,54 @@ def ingest_file(conn, path, filename):
     return inserted
 
 
+def report_session(conn, sid):
+    """Print one session's full rollup. sid='latest' resolves to the newest session.
+
+    This is what the session-close skill calls to populate its per-session telemetry:
+    one command that refreshes the db and prints exactly the numbers the close-out needs.
+    """
+    if sid in (None, "latest", "LATEST"):
+        row = conn.execute(
+            "SELECT session_id FROM skill_runs ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            print("No sessions in telemetry yet.")
+            return
+        sid = row[0]
+
+    run = conn.execute(
+        "SELECT started_at, last_event_at, duration_secs, model, tool_calls, prompts, "
+        "skill_invocations FROM skill_runs WHERE session_id = ?", (sid,)
+    ).fetchone()
+    if not run:
+        print(f"No telemetry for session {sid}.")
+        return
+    started, last, dur, model, tools, prompts, skills = run
+    dur_str = "?" if dur is None else f"{dur // 60}m{dur % 60:02d}s"
+    print(f"\n== Session {sid} ==")
+    print(f"  started: {started}   last event: {last}   wall-clock: {dur_str}")
+    print(f"  model: {model or '(not captured)'}   tool calls: {tools or 0}   "
+          f"prompts: {prompts or 0}   skill invocations: {skills or 0}")
+    print("  per-tool:")
+    rows = conn.execute(
+        "SELECT tool, COUNT(*) FROM skill_events WHERE session_id = ? AND event = 'PostToolUse' "
+        "GROUP BY tool ORDER BY 2 DESC", (sid,)
+    ).fetchall()
+    if not rows:
+        print("    (no tool calls captured)")
+    for tool, n in rows:
+        print(f"    {tool or '(unknown)':<16} {n}")
+    skl = conn.execute(
+        "SELECT skill, COUNT(*) FROM skill_events WHERE session_id = ? AND tool = 'Skill' "
+        "AND skill IS NOT NULL GROUP BY skill ORDER BY 2 DESC", (sid,)
+    ).fetchall()
+    if skl:
+        print("  skills invoked:")
+        for skill, n in skl:
+            print(f"    {skill:<30} {n}")
+    print()
+
+
 def report(conn):
     def q(sql):
         return conn.execute(sql).fetchall()
@@ -118,6 +166,7 @@ def main():
     ap.add_argument("--schema", default=os.path.join(here, "telemetry-schema.sql"))
     ap.add_argument("--report", action="store_true", help="print a summary after ingest")
     ap.add_argument("--report-only", action="store_true", help="skip ingest, only print a summary")
+    ap.add_argument("--session", metavar="ID", help="print one session's rollup ('latest' for the newest)")
     args = ap.parse_args()
 
     db_path = args.db or os.path.join(args.dir, "telemetry.db")
@@ -130,7 +179,9 @@ def main():
             for fn in JSONL_FILES:
                 total += ingest_file(conn, os.path.join(args.dir, fn), fn)
             print(f"Ingested {total} new event(s) into {db_path}")
-        if args.report or args.report_only:
+        if args.session is not None:
+            report_session(conn, args.session)
+        elif args.report or args.report_only:
             report(conn)
     finally:
         conn.close()

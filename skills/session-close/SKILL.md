@@ -84,20 +84,16 @@ that does not exist or yields nothing, report it as "not captured (no source)". 
 estimate numbers you cannot read. Return a compact block, nothing verbose.
 
 Sources to check:
-- /root/.claude/telemetry/activity.jsonl and /root/.claude/telemetry/tool-usage.jsonl
-  (Claude Code hook telemetry, written by telemetry-hook.sh - one JSONL line per tool
-  call and per session-boundary event). Read them like this:
-    1. Active session_id = the session_id on the LAST line of tool-usage.jsonl (fall
-       back to the last SessionStart in activity.jsonl). This is the session being
-       closed. Caveat: if two Claude sessions ran on this box at once, pick the most
-       recent session_id and say so.
-    2. Tool counts = count tool-usage.jsonl lines for that session_id, grouped by the
-       "tool" field (e.g. Bash: 12, Edit: 4, Read: 9).
-    3. Session wall-clock = (latest event ts for that session_id) minus its SessionStart
-       ts in activity.jsonl, if a SessionStart line exists.
-    4. Prompt count = UserPromptSubmit lines for that session_id in activity.jsonl.
-  If a file is missing or empty, report that source as "not captured (no hook data yet)";
-  do not guess. jq one-liners are fine.
+- Claude Code hook telemetry. The hook (telemetry-hook.sh) appends raw events to
+  /root/.claude/telemetry/*.jsonl; telemetry-ingest.py loads them into telemetry.db and
+  computes the per-session rollup via the skill_runs view. Run ONE command:
+      python3 /root/.claude/skills/session-close/scripts/telemetry-ingest.py --session latest
+  It ingests any new events, then prints the session being closed: wall-clock, model,
+  tool-call count, prompt count, skill invocations, and the per-tool breakdown. Use that
+  output verbatim. "latest" = the most recently started session; if two Claude sessions
+  overlapped on this box, say which one you reported. If it prints "No sessions in
+  telemetry yet" or the script/db is missing, report Claude telemetry as "not captured
+  (hook not wired on this box)"; do not guess or hand-derive from the raw JSONL.
 - pm2 jlist  (process uptime / restarts, for automation runtime)
 - n8n execution logs or API if reachable  (workflow executions this window)
 - tailscale status  (which tailnet peers were used)
