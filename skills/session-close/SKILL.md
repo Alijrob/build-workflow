@@ -1,6 +1,6 @@
 ---
 name: session-close
-description: Close out a coding/build session with adversarial, verification-first rigor. Gates the close-out onto Opus (the high-judgment work runs on the best model), delegates verbose log-scraping and git plumbing to cheap Haiku subagents so they never pollute the main context, runs deterministic git via a bundled bash script, captures company-cost telemetry (tool/service usage, API usage, time-in-function), commits and pushes, writes a session log to docs/session-logs/, and prints a paste-ready resume prompt. Run at the end of any build session. Trigger on "close the session", "session close", "wrap this session", "/session-close", "save and close out".
+description: Close out a coding/build session with adversarial, verification-first rigor. Authors the brief and session log on the context-bearing main thread, runs a single final adversarial verification pass via an Opus subagent, delegates verbose log-scraping and git plumbing to cheap Haiku subagents so they never pollute the main context, runs deterministic git via a bundled bash script, captures company-cost telemetry (tool/service usage, API usage, time-in-function), commits and pushes, writes a session log to docs/session-logs/, and prints a paste-ready resume prompt. Run at the end of any build session. Trigger on "close the session", "session close", "wrap this session", "/session-close", "save and close out".
 ---
 
 # Session Close
@@ -17,26 +17,19 @@ Closes out a build session: prove repo state, commit only this session's work, p
 
 ---
 
-## STEP 0 - Model gate (the first thing that happens)
+## STEP 0 - How this close-out runs (no model gate)
 
-This close-out runs on Opus. The operator typically works on Sonnet, so the very first action is to confirm the model.
+This skill runs in one action on whatever model the session is already on. Do not ask the operator to switch models, and do not stop to wait for a switch.
 
-1. Determine your current model from your own system context.
-2. **If you are not an Opus model:** output exactly this and STOP. Do nothing else, spawn nothing, run no git commands.
+- **The main thread authors.** You lived through this session, so you write the brief, the doc edits, and the session log. None of that can be delegated, because a subagent cannot see this conversation.
+- **Haiku does the grunt work.** Verbose telemetry scraping (Step 2) and deterministic git plumbing (Step 5) run on cheap Haiku subagents so their output never bloats this context.
+- **One Opus subagent verifies at the end.** After the log is written, a single Opus subagent (Step 4) receives the finished artifacts as text and runs the adversarial verification pass. The best-model judgment is spent only where it adds the most value, and only once there is something concrete to check. You apply its findings before anything is committed.
 
-   ```
-   Switch to Opus before closing out. The close-out reasoning and verification
-   run on the best model. Type:  /model opus
-   Then run /session-close again.
-   ```
-
-3. **If you are on Opus:** proceed to Step 1.
-
-> A skill cannot pull the `/model` lever itself; that is an operator action. This gate enforces the switch by refusing to run until you are on Opus. Once on Opus, the whole close-out proceeds on Opus, and only the verbose grunt work is pushed down to cheap subagents.
+Proceed to Step 1.
 
 ---
 
-## STEP 1 - Assemble the brief (you, on Opus, from session memory)
+## STEP 1 - Assemble the brief (you, the main thread, from session memory)
 
 You lived through this session. Reconstruct from memory; do NOT dump `git diff` into this context to rediscover what you did. Determine:
 
@@ -54,7 +47,7 @@ PRIMARY_DOMAIN      -
 SERVER_PATH         -
 CURRENT_PHASE       -
 SESSION_GOAL        -
-SESSION_MODEL       - model this session ran on before the switch (for telemetry)
+SESSION_MODEL       - model this session (and this close-out) ran on (for telemetry)
 ```
 
 **Session content** (you author this; subagents only execute or scrape):
@@ -74,7 +67,7 @@ SESSION_MODEL       - model this session ran on before the switch (for telemetry
 
 ## STEP 2 - Cost & Telemetry subagent (Haiku, runs in parallel)
 
-These numbers are company costs the operator analyzes, so capture them every session. The verbose log output must stay out of this Opus context, so delegate the scraping.
+These numbers are company costs the operator analyzes, so capture them every session. The verbose log output must stay out of this context, so delegate the scraping.
 
 Spawn an **Agent** with `subagent_type: general-purpose`, `model: haiku`, `run_in_background: true`, briefed to scrape only the sources that exist and to label every missing source rather than guess:
 
@@ -114,13 +107,13 @@ Note the agent ID; you will fold its returned block into the session log. Contin
 
 ---
 
-## STEP 3 - Write the session log (you, on Opus)
+## STEP 3 - Write the session log (you, the main thread)
 
 Write `docs/session-logs/YYYY-MM-DD-session-summary.md` (use that path if `docs/` exists in the repo; fall back to `session-logs/` at repo root only if there is no `docs/`). Use the template in `references/session-summary-template.md`. Add the telemetry subagent's returned block as the `## Telemetry` section, prepending the model line:
 
 ```
 ## Telemetry
-- Model: main close-out on [Opus model]; session ran on [SESSION_MODEL]; subagents on Haiku
+- Model: close-out authored on the main thread ([SESSION_MODEL]); final verification on an Opus subagent; telemetry and git plumbing on Haiku subagents
 [then the Claude tool counts / Session wall-clock / Prompts / External services / API usage /
  Time in function / Source lines returned by the subagent. Prefer the subagent's hook-derived
  tool counts over your own recollection; fall back to recollection only if the hook data is missing.]
@@ -130,7 +123,38 @@ Leave the `Commit SHA` placeholder; the git executor fills it. Add the log path 
 
 ---
 
-## STEP 4 - Git executor subagent (Haiku) runs the bundled script
+## STEP 4 - Adversarial verification pass (Opus subagent)
+
+The session log and brief are now drafted but NOT yet committed. Spawn a single **Agent** with `subagent_type: general-purpose`, `model: opus` to adversarially review them. It cannot see this conversation, so paste the artifacts in as text: the full session log, plus the VERIFIED / BLOCKED / UNVERIFIED lists and the exact list of files you are about to commit.
+
+Brief it:
+
+```
+You are the adversarial verifier for a build-session close-out. You did NOT witness the
+session; judge ONLY the text given. Be skeptical: your job is to catch claims that are
+asserted but not proven, not to rubber-stamp.
+
+Review the pasted session log and brief for:
+- Confidence-not-proof: any item under "Verified" not backed by a command, tool run, or
+  file operation actually shown. Demand it be moved to "Unverified" or proven.
+- Internal inconsistency: the summary describes a change missing from "Files Changed", a
+  SHA referenced two different ways, a "Next Step" that contradicts "Phase Status", or
+  tests claimed run with no command.
+- Scope creep: files in the commit list the narrative never explains (a possible sweep of
+  unrelated dirty files).
+- Em dashes anywhere (banned). Flag each occurrence.
+- Missing or hand-waved blockers, next steps, or resume detail.
+
+Return a compact findings list, each tagged MUST-FIX or OPTIONAL, naming the exact line or
+phrase and the change to make. If the artifacts are clean, say so explicitly. Do not
+rewrite the documents; only report findings.
+```
+
+Apply every MUST-FIX to the session log and any doc you already edited. Do NOT proceed to the git executor until each MUST-FIX is resolved, or you have a defensible reason (recorded in the log) to overrule one. This pass runs before the commit so the corrections land in it.
+
+---
+
+## STEP 5 - Git executor subagent (Haiku) runs the bundled script
 
 Delegate git plumbing so its output stays out of this context. The script is deterministic and spends no model tokens; the subagent just invokes it and reports back. Spawn an **Agent** with `subagent_type: general-purpose`, `model: haiku`:
 
@@ -169,7 +193,7 @@ If the executor reports a secret-scan abort (exit 3): surface the flagged lines 
 
 ---
 
-## STEP 5 - Final report and resume prompt (you, on Opus)
+## STEP 6 - Final report and resume prompt (you, the main thread)
 
 Collect the telemetry subagent's result and the git executor's SHAs. Output the final report, then the resume prompt from `references/resume-prompt-template.md` filled in with the resume SHA.
 
@@ -197,10 +221,11 @@ Then paste the resume block. End with: **Safe to clear this session now.**
 
 ## Subagent roster (why each exists)
 
-| Agent | Model | Job | Why not on the main thread |
-|-------|-------|-----|----------------------------|
-| main | Opus | judgment: brief, summary, verification, orchestration | needs full session context and best-model quality |
-| cost/telemetry scraper | Haiku | reads logs for service/API/time cost | verbose log output would bloat Opus context |
-| git executor | Haiku | runs the bash script, reports SHAs | git command output would bloat Opus context |
+| Agent | Model | Job | Why here |
+|-------|-------|-----|----------|
+| main thread | session model | authoring: brief, doc edits, session log, orchestration, applying fixes | only the main thread can see the live session, and authoring needs that context |
+| adversarial verifier | Opus | final skeptical review of the finished log and brief | best-model judgment, spent once on concrete artifacts; fed as text since it cannot see the session |
+| cost/telemetry scraper | Haiku | reads logs for service/API/time cost | verbose log output would bloat the main context |
+| git executor | Haiku | runs the bash script, reports SHAs | git command output would bloat the main context |
 
 The deterministic git work itself lives in `scripts/session-close.sh` and costs zero model tokens; the executor subagent only invokes it.
